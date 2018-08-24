@@ -21,17 +21,13 @@ import (
 	"os"
 
 	"github.com/golang/glog"
-	"github.com/kubernetes-incubator/apiserver-builder/pkg/controller"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 	"k8s.io/apiserver/pkg/util/logs"
-	"k8s.io/client-go/kubernetes"
-	machineactuator "sigs.k8s.io/cluster-api-provider-aws/cloud/aws/actuators/machine"
-	awsclient "sigs.k8s.io/cluster-api-provider-aws/cloud/aws/client"
-	"sigs.k8s.io/cluster-api/pkg/client/clientset_generated/clientset"
 	"sigs.k8s.io/cluster-api/pkg/controller/config"
-	"sigs.k8s.io/cluster-api/pkg/controller/machine"
-	"sigs.k8s.io/cluster-api/pkg/controller/sharedinformers"
+
+	"sigs.k8s.io/cluster-api-provider-aws/cloud/aws/controllers/machine"
+	"sigs.k8s.io/cluster-api-provider-aws/cloud/aws/controllers/machine/options"
 )
 
 var (
@@ -56,21 +52,6 @@ func main() {
 	logs.InitLogs()
 	defer logs.FlushLogs()
 
-	config, err := controller.GetConfig(config.ControllerConfig.Kubeconfig)
-	if err != nil {
-		glog.Fatalf("Could not create Config for talking to the apiserver: %v", err)
-	}
-
-	client, err := clientset.NewForConfig(config)
-	if err != nil {
-		glog.Fatalf("Could not create client for talking to the apiserver: %v", err)
-	}
-
-	kubeClient, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		glog.Fatalf("Could not create kubernetes client to talk to the apiserver: %v", err)
-	}
-
 	log.SetOutput(os.Stdout)
 	if lvl, err := log.ParseLevel(logLevel); err != nil {
 		log.Panic(err)
@@ -78,18 +59,8 @@ func main() {
 		log.SetLevel(lvl)
 	}
 
-	logger := log.WithField("controller", controllerLogName)
-
-	actuator, err := machineactuator.NewActuator(kubeClient, client, logger, awsclient.NewClient)
-	if err != nil {
-		glog.Fatalf("Could not create AWS machine actuator: %v", err)
+	machineServer := options.NewServer()
+	if err := machine.Run(machineServer); err != nil {
+		glog.Errorf("Failed to start cluster controller. Err: %v", err)
 	}
-
-	shutdown := make(chan struct{})
-	si := sharedinformers.NewSharedInformers(config, shutdown)
-	// If this doesn't compile, the code generator probably
-	// overwrote the customized NewMachineController function.
-	c := machine.NewMachineController(config, si, actuator)
-	c.Run(shutdown)
-	select {}
 }
